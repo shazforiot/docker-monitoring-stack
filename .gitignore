@@ -1,0 +1,4 @@
+# secrets and local settings: never commit these
+.env
+*.bak
+alertmanager/secrets/

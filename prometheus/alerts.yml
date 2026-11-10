@@ -1,0 +1,75 @@
+# Alert rules: each one is a PromQL question. If the answer stays true for the "for" time, the alert fires.
+groups:
+  - name: demo-app
+    rules:
+      - alert: DemoAppDown
+        expr: up{job="demo-app"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "The demo app is down"
+          description: "Prometheus could not reach {{ $labels.instance }} for 30 seconds."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(demo_http_requests_total{status=~"5.."}[1m]))
+            / sum(rate(demo_http_requests_total[1m])) > 0.10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 10% of requests are failing"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last minute."
+
+      - alert: SlowRequests
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(demo_http_request_duration_seconds_bucket[1m]))) > 0.5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The demo app is slow"
+          description: "95% of requests take up to {{ $value | humanizeDuration }}."
+
+  - name: machine
+    rules:
+      - alert: HighCpuUsage
+        expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[2m]))) > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU usage is above 85%"
+          description: "CPU usage is {{ $value | printf \"%.0f\" }}%."
+
+      - alert: HighMemoryUsage
+        expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory usage is above 90%"
+          description: "Memory usage is {{ $value | printf \"%.0f\" }}%."
+
+      - alert: DiskAlmostFull
+        expr: |
+          100 * (1 - node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs"}
+            / node_filesystem_size_bytes{fstype=~"ext4|xfs|btrfs"}) > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A disk is more than 90% full"
+          description: "{{ $labels.mountpoint }} is {{ $value | printf \"%.0f\" }}% full."
+
+  - name: monitoring
+    rules:
+      - alert: TargetDown
+        expr: up{job!="demo-app"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus could not scrape {{ $labels.instance }} for 1 minute."

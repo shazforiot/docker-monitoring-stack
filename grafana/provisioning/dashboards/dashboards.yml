@@ -1,0 +1,12 @@
+# Load every JSON file in /var/lib/grafana/dashboards as a dashboard.
+apiVersion: 1
+
+providers:
+  - name: demo
+    folder: Monitoring Demo
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

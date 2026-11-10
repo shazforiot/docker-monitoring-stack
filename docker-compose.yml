@@ -1,0 +1,120 @@
+# Monitoring stack: Prometheus + Grafana + Loki + Alertmanager, watching a demo app and this machine.
+# Start it with scripts/start.sh (or start.ps1). Everything below is plain Docker Compose.
+name: monitoring
+
+services:
+  # ── METRICS ────────────────────────────────────────────────────────────────
+  prometheus:                       # collects numbers every 10 s and checks the alert rules
+    image: prom/prometheus:${PROMETHEUS_VERSION:-v3.16.0}
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-7d}
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on: [alertmanager]
+    restart: unless-stopped
+
+  node-exporter:                    # turns CPU, memory, disk and network of this machine into metrics
+    image: prom/node-exporter:${NODE_EXPORTER_VERSION:-v1.12.1}
+    container_name: node-exporter
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    restart: unless-stopped
+
+  # ── ALERTS ─────────────────────────────────────────────────────────────────
+  alertmanager:                     # groups firing alerts and sends them to Discord
+    image: prom/alertmanager:${ALERTMANAGER_VERSION:-v0.35.0}
+    container_name: alertmanager
+    command:
+      - --config.file=/etc/alertmanager/${ALERTMANAGER_CONFIG:-alertmanager.yml}
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    restart: unless-stopped
+
+  # ── LOGS ───────────────────────────────────────────────────────────────────
+  loki:                             # stores the logs
+    image: grafana/loki:${LOKI_VERSION:-3.7.9}
+    container_name: loki
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki:/etc/loki:ro
+      - loki_data:/loki
+    restart: unless-stopped
+
+  alloy:                            # reads the logs of every container and ships them to Loki
+    image: grafana/alloy:${ALLOY_VERSION:-v1.21.3}
+    container_name: alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./alloy:/etc/alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on: [loki]
+    restart: unless-stopped
+
+  # ── DASHBOARDS ─────────────────────────────────────────────────────────────
+  grafana:                          # the screen: data sources and dashboards load automatically
+    image: grafana/grafana:${GRAFANA_VERSION:-13.3.0}
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/demo-app.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus, loki]
+    restart: unless-stopped
+
+  # ── THE THING WE WATCH ─────────────────────────────────────────────────────
+  demo-app:                         # small shop API with a /metrics page and JSON logs
+    image: python:${PYTHON_VERSION:-3.13-alpine}
+    container_name: demo-app
+    command: python -u /app/app.py
+    volumes:
+      - ./app:/app:ro
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  traffic:                          # fake visitors, so the graphs move
+    image: python:${PYTHON_VERSION:-3.13-alpine}
+    container_name: traffic
+    command: python -u /app/traffic.py
+    environment:
+      TARGET: http://demo-app:8080
+      REQUESTS_PER_SECOND: ${REQUESTS_PER_SECOND:-6}
+    volumes:
+      - ./app:/app:ro
+    depends_on: [demo-app]
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  loki_data:
+  grafana_data:

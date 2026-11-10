@@ -1,0 +1,23 @@
+# Alertmanager WITH Discord. The start script selects this file when DISCORD_WEBHOOK_URL is set in .env.
+route:
+  receiver: discord
+  group_by: [alertname]         # one message per alert name
+  group_wait: 10s               # wait 10 s to collect related alerts
+  group_interval: 1m
+  repeat_interval: 4h           # remind every 4 hours while it is still firing
+
+receivers:
+  - name: discord
+    discord_configs:
+      - webhook_url_file: /etc/alertmanager/secrets/discord_webhook   # written by the start script, never committed
+        send_resolved: true     # also tell me when it is fixed
+        title: '{{ if eq .Status "firing" }}🔥 FIRING{{ else }}✅ RESOLVED{{ end }}: {{ .CommonLabels.alertname }}'
+        message: |-
+          {{ range .Alerts }}**{{ .Annotations.summary }}**
+          {{ .Annotations.description }}
+          severity: `{{ .Labels.severity }}`
+          {{ end }}
+
+inhibit_rules:                  # if the app is down, do not also complain about its error rate
+  - source_matchers: [alertname="DemoAppDown"]
+    target_matchers: [alertname=~"HighErrorRate|SlowRequests"]
